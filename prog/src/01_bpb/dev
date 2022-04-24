@@ -1,0 +1,4 @@
+#!/bin/sh
+
+nasm bpb.s -o boot.img -l bpb.lst
+qemu-system-i386 -drive file=boot.img,format=raw -boot order=c

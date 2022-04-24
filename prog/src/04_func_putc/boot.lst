@@ -1,0 +1,93 @@
+     1                                      BOOT_LOAD   equ     0x7c00
+     2                                      ORG     BOOT_LOAD
+     3                                  
+     4                                      ; --- macro ---
+     5                                      %include    "../include/macro.s"
+     1                              <1> ; --- cdecl ---
+     2                              <1> 
+     3                              <1> %macro cdecl 1-*.nolist
+     4                              <1>     %rep    %0 - 1
+     5                              <1>         push    %{-1:-1}
+     6                              <1>         %rotate -1
+     7                              <1>     %endrep
+     8                              <1>     %rotate -1
+     9                              <1> 
+    10                              <1>     call    %1
+    11                              <1> 
+    12                              <1>     %if 1 < %0          ; delete args
+    13                              <1>         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
+    14                              <1>     %endif
+    15                              <1> %endmacro
+     6                                  
+     7                                  
+     8                                      ; --- entry point ---
+     9                                  entry: 
+    10 00000000 EB58                        jmp     ipl
+    11                                  
+    12                                  
+    13                                      ; --- BIOS Parameter Block ---
+    14 00000002 90<rept>                    times   90 - ($ - $$) db 0x90
+    15                                  
+    16                                  
+    17                                      ; --- Initial Program Loader ---
+    18                                  ipl:
+    19                                  
+    20 0000005A FA                          cli
+    21                                  
+    22 0000005B B80000                      mov     ax, 0x00
+    23 0000005E 8ED8                        mov     ds, ax
+    24 00000060 8EC0                        mov     es, ax
+    25 00000062 8ED0                        mov     ss, ax                  ; ds = es = ss = 0
+    26 00000064 BC007C                      mov     sp, BOOT_LOAD           ; sp = 0x7c00
+    27                                  
+    28 00000067 FB                          sti
+    29                                  
+    30 00000068 8816[8600]                  mov     [BOOT.DRIVE],    dl     ; save drive number
+    31                                  
+    32 0000006C 6A58E8170083C402            cdecl   putc, word 'X'          ; write text in teletype mode
+    33 00000074 6A59E80F0083C402            cdecl   putc, word 'Y'
+    34 0000007C 6A5AE8070083C402            cdecl   putc, word 'Z'
+    35                                  
+    36 00000084 EBFE                        jmp     $                       ; while(1);
+    37                                  
+    38                                  
+    39                                      ALIGN 2, db 0
+    40                                  BOOT:
+    41 00000086 0000                    .DRIVE:     dw  0                   ; Drive number
+    42                                  
+    43                                      ; --- modules ---
+    44                                      %include    "../modules/real/putc.s"
+     1                              <1> ; void putc(int16 chcode)
+     2                              <1> 
+     3                              <1> putc:
+     4                              <1> 
+     5                              <1>     ; build stack frame
+     6 00000088 55                  <1>     push    bp
+     7 00000089 89E5                <1>     mov     bp, sp
+     8                              <1> 
+     9                              <1>     ; save registers
+    10 0000008B 50                  <1>     push    ax
+    11 0000008C 53                  <1>     push    bx
+    12                              <1> 
+    13                              <1> 
+    14                              <1>     ; write text in teletype mode
+    15 0000008D 8A4604              <1>     mov     al, [bp + 4]
+    16 00000090 B40E                <1>     mov     ah, 0x0E
+    17 00000092 BB0000              <1>     mov     bx, 0x00
+    18 00000095 CD10                <1>     int     0x10
+    19                              <1> 
+    20                              <1> 
+    21                              <1>     ; return registers
+    22 00000097 5B                  <1>     pop     bx
+    23 00000098 58                  <1>     pop     ax
+    24                              <1> 
+    25                              <1>     ; destroy stack frame
+    26 00000099 89EC                <1>     mov     sp, bp
+    27 0000009B 5D                  <1>     pop     bp
+    28                              <1> 
+    29 0000009C C3                  <1>     ret
+    45                                  
+    46                                  
+    47                                      ; --- boot flag ---
+    48 0000009D 00<rept>                    times   510 - ($ - $$) db 0x00
+    49 000001FE 55AA                        db      0x55, 0xAA              ; boot flag
