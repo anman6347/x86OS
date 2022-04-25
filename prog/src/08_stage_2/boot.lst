@@ -1,0 +1,306 @@
+     1                                      BOOT_LOAD   equ     0x7c00
+     2                                      ORG     BOOT_LOAD
+     3                                  
+     4                                      ; --- macro ---
+     5                                      %include    "../include/macro.s"
+     1                              <1> ; --- cdecl ---
+     2                              <1> 
+     3                              <1> %macro cdecl 1-*.nolist
+     4                              <1>     %rep    %0 - 1
+     5                              <1>         push    %{-1:-1}
+     6                              <1>         %rotate -1
+     7                              <1>     %endrep
+     8                              <1>     %rotate -1
+     9                              <1> 
+    10                              <1>     call    %1
+    11                              <1> 
+    12                              <1>     %if 1 < %0          ; delete args
+    13                              <1>         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
+    14                              <1>     %endif
+    15                              <1> %endmacro
+     6                                  
+     7                                  
+     8                                      ; --- entry point ---
+     9                                  entry: 
+    10 00000000 EB58                        jmp     ipl
+    11                                  
+    12                                  
+    13                                      ; --- BIOS Parameter Block ---
+    14 00000002 90<rept>                    times   90 - ($ - $$) db 0x90
+    15                                  
+    16                                  
+    17                                      ; --- Initial Program Loader ---
+    18                                  ipl:
+    19                                  
+    20 0000005A FA                          cli
+    21                                  
+    22 0000005B B80000                      mov     ax, 0x00
+    23 0000005E 8ED8                        mov     ds, ax
+    24 00000060 8EC0                        mov     es, ax
+    25 00000062 8ED0                        mov     ss, ax                  ; ds = es = ss = 0
+    26 00000064 BC007C                      mov     sp, BOOT_LOAD           ; sp = 0x7c00
+    27                                  
+    28 00000067 FB                          sti
+    29                                  
+    30 00000068 8816[BA00]                  mov     [BOOT.DRIVE],    dl     ; save drive number
+    31                                  
+    32 0000006C 68[9800]E85F0083C4-         cdecl   puts, .s0               ; write text in teletype mode
+    32 00000074 02                 
+    33                                  
+    34                                  
+    35                                      ; read next 512 bytes
+    36 00000075 B402                        mov     ah, 0x02            ; read disk sectors
+    37 00000077 B001                        mov     al, 1               ; number of sectors to read
+    38 00000079 B90200                      mov     cx, 0x0002          ; cylinder/sector number
+    39 0000007C B600                        mov     dh, 0x00            ; head number
+    40 0000007E 8A16[BA00]                  mov     dl, [BOOT.DRIVE]    ; drive number
+    41 00000082 BB007E                      mov     bx, 0x7c00 + 512    ; pointer to buffer
+    42 00000085 CD13                        int     0x13
+    43                                  
+    44 00000087 730C                        jnc     .10E                ; read error
+    45 00000089 68[A500]E8420083C4-         cdecl   puts, .e0
+    45 00000091 02                 
+    46 00000092 E8DC00                      call    reboot
+    47                                  .10E:
+    48                                  
+    49                                      ; transition to the 2nd stage
+    50 00000095 E96801                      jmp     stage_2
+    51                                  
+    52                                  
+    53                                  
+    54 00000098 426F6F74696E672E2E-     .s0:    db  "Booting...", 0x0A, 0x0D, 0x00
+    54 000000A1 2E0A0D00           
+    55 000000A5 4572726F723A736563-     .e0:    db  "Error:sector read", 0x0A, 0x0D, 0x00
+    55 000000AE 746F7220726561640A-
+    55 000000B7 0D00               
+    56                                  
+    57 000000B9 00                          ALIGN 2, db 0
+    58                                  BOOT:
+    59 000000BA 0000                    .DRIVE:     dw  0                   ; Drive number
+    60                                  
+    61                                      ; --- modules ---
+    62                                      %include    "../modules/real/putc.s"
+     1                              <1> ; void putc(int16 chcode)
+     2                              <1> 
+     3                              <1> putc:
+     4                              <1> 
+     5                              <1>     ; build stack frame
+     6 000000BC 55                  <1>     push    bp
+     7 000000BD 89E5                <1>     mov     bp, sp
+     8                              <1> 
+     9                              <1>     ; save registers
+    10 000000BF 50                  <1>     push    ax
+    11 000000C0 53                  <1>     push    bx
+    12                              <1> 
+    13                              <1> 
+    14                              <1>     ; write text in teletype mode
+    15 000000C1 8A4604              <1>     mov     al, [bp + 4]
+    16 000000C4 B40E                <1>     mov     ah, 0x0E
+    17 000000C6 BB0000              <1>     mov     bx, 0x00
+    18 000000C9 CD10                <1>     int     0x10
+    19                              <1> 
+    20                              <1> 
+    21                              <1>     ; return registers
+    22 000000CB 5B                  <1>     pop     bx
+    23 000000CC 58                  <1>     pop     ax
+    24                              <1> 
+    25                              <1>     ; destroy stack frame
+    26 000000CD 89EC                <1>     mov     sp, bp
+    27 000000CF 5D                  <1>     pop     bp
+    28                              <1> 
+    29 000000D0 C3                  <1>     ret
+    63                                      %include    "../modules/real/puts.s"
+     1                              <1> ; void puts(int16 straddr)
+     2                              <1> ; write str from head to '\0'
+     3                              <1> 
+     4                              <1> 
+     5                              <1> puts:
+     6                              <1> 
+     7                              <1>     ; build stack frame
+     8 000000D1 55                  <1>     push    bp
+     9 000000D2 89E5                <1>     mov     bp, sp
+    10                              <1> 
+    11                              <1>     ; save registers
+    12 000000D4 50                  <1>     push    ax
+    13 000000D5 53                  <1>     push    bx
+    14 000000D6 56                  <1>     push    si
+    15                              <1> 
+    16                              <1>     ; get arg
+    17 000000D7 8B7604              <1>     mov     si, [bp + 4]    ; si = straddr
+    18                              <1> 
+    19                              <1>     ; write text in teletype mode
+    20 000000DA B40E                <1>     mov     ah, 0x0E
+    21 000000DC BB0000              <1>     mov     bx, 0x00
+    22 000000DF FC                  <1>     cld                     ; DF = 0    
+    23                              <1> .10L:
+    24 000000E0 AC                  <1>     lodsb
+    25 000000E1 3C00                <1>     cmp     al, 0           ; if (*(si++) == 0)
+    26 000000E3 7404                <1>     je      .10E            ; break;
+    27 000000E5 CD10                <1>     int     0x10
+    28 000000E7 EBF7                <1>     jmp     .10L
+    29                              <1> .10E:
+    30                              <1> 
+    31                              <1>     ; return registers
+    32 000000E9 5E                  <1>     pop     si
+    33 000000EA 5B                  <1>     pop     bx
+    34 000000EB 58                  <1>     pop     ax
+    35                              <1> 
+    36                              <1>     ; destroy stack frame
+    37 000000EC 89EC                <1>     mov     sp, bp
+    38 000000EE 5D                  <1>     pop     bp
+    39                              <1> 
+    40 000000EF C3                  <1>     ret
+    64                                      %include    "../modules/real/itoa.s"
+     1                              <1> ; void itos(int num, char* buf, int size, int radix, int flags);
+     2                              <1> ; flags = 1 : num is used as signed
+     3                              <1> ; flags = 2 : display plus/minus sign
+     4                              <1> ; flags = 4 : fill in the space with 0
+     5                              <1> 
+     6                              <1> 
+     7                              <1> itoa:
+     8                              <1>     ; build stack frame
+     9 000000F0 55                  <1>     push    bp
+    10 000000F1 89E5                <1>     mov     bp, sp
+    11                              <1> 
+    12                              <1>     ; save registers' data
+    13 000000F3 50                  <1>     push    ax
+    14 000000F4 53                  <1>     push    bx
+    15 000000F5 51                  <1>     push    cx
+    16 000000F6 52                  <1>     push    dx
+    17 000000F7 56                  <1>     push    si
+    18 000000F8 57                  <1>     push    di
+    19                              <1> 
+    20                              <1>     ; get args
+    21 000000F9 8B4604              <1>     mov     ax, [bp + 4]    ; ax = num;
+    22 000000FC 8B7606              <1>     mov     si, [bp + 6]    ; si = buf;
+    23 000000FF 8B4E08              <1>     mov     cx, [bp + 8]    ; cx = size;
+    24                              <1> 
+    25 00000102 89F7                <1>     mov     di, si
+    26 00000104 01CF                <1>     add     di, cx
+    27 00000106 4F                  <1>     dec     di              ; di = &(buf[size - 1]);
+    28                              <1> 
+    29 00000107 8B5E0C              <1>     mov     bx, [bp + 12]   ; bx = flags;
+    30                              <1> 
+    31                              <1>     ; positive/negative judgement
+    32 0000010A F7C30100            <1>     test    bx, 0b0001      ; if (flags & 0x01)
+    33 0000010E 7408                <1>     je      .10E
+    34 00000110 83F800              <1>     cmp     ax, 0           ;   if (num < 0)
+    35 00000113 7D03                <1>     jge     .12E
+    36 00000115 83CB02              <1>     or      bx, 0b0010      ;       flags |= 2;
+    37                              <1> .10E:
+    38                              <1> .12E:
+    39                              <1> 
+    40                              <1>     ; which sould be displayed pos/neg ?
+    41 00000118 F7C30200            <1>     test    bx, 0b0010
+    42 0000011C 7410                <1>     je      .20E
+    43 0000011E 83F800              <1>     cmp     ax, 0
+    44 00000121 7D07                <1>     jge     .22F
+    45 00000123 F7D8                <1>     neg     ax              ; num *= -1;
+    46 00000125 C6042D              <1>     mov     [si], byte '-'  ; buf[0] = '-';
+    47 00000128 EB03                <1>     jmp     .22E
+    48                              <1> .22F:
+    49 0000012A C6042B              <1>     mov     [si], byte '+'
+    50                              <1> .22E:
+    51 0000012D 49                  <1>     dec     cx
+    52                              <1> .20E:
+    53                              <1> 
+    54                              <1> 
+    55                              <1>     ; convert num to ASCII
+    56 0000012E 8B5E0A              <1>     mov     bx, [bp + 10]           ; bx = radix
+    57                              <1> .30L:
+    58 00000131 BA0000              <1>     mov     dx, 0
+    59 00000134 F7F3                <1>     div     bx                      ; ax = dx:ax % bx,;     dx = dx:ax % bx;
+    60                              <1> 
+    61 00000136 89D6                <1>     mov     si, dx
+    62 00000138 8A94[6101]          <1>     mov     dl, byte [.ascii + si]  ; dl = ascii[si];
+    63                              <1> 
+    64 0000013C 8815                <1>     mov     [di], dl                ; buf[size - i]
+    65 0000013E 4F                  <1>     dec     di
+    66                              <1> 
+    67 0000013F 83F800              <1>     cmp     ax, 0
+    68 00000142 E0ED                <1>     loopnz  .30L
+    69                              <1> 
+    70                              <1> 
+    71                              <1>     ; fill in the space
+    72 00000144 83F900              <1>     cmp     cx, 0
+    73 00000147 740E                <1>     je      .40E
+    74 00000149 B020                <1>     mov     al, ' '
+    75 0000014B F7460C0400          <1>     test    [bp + 12], word 0b0100  ; if (flags & 0x04)
+    76 00000150 7402                <1>     je     .42E
+    77 00000152 B030                <1>     mov     al, '0'
+    78                              <1> .42E:
+    79 00000154 FD                  <1>     std                             ; DF = 1 (- direction)
+    80 00000155 F3AA                <1>     rep stosb                       ; while(--cx) [di--] = al;
+    81                              <1> .40E:
+    82                              <1> 
+    83                              <1> 
+    84                              <1>     ; return registers' data
+    85 00000157 5F                  <1>     pop     di
+    86 00000158 5E                  <1>     pop     si
+    87 00000159 5A                  <1>     pop     dx
+    88 0000015A 59                  <1>     pop     cx
+    89 0000015B 5B                  <1>     pop     bx
+    90 0000015C 58                  <1>     pop     ax
+    91                              <1> 
+    92                              <1>     ; destroy stack frame
+    93 0000015D 89EC                <1>     mov     sp, bp
+    94 0000015F 5D                  <1>     pop     bp
+    95                              <1> 
+    96 00000160 C3                  <1>     ret
+    97                              <1> 
+    98                              <1> 
+    99 00000161 303132333435363738- <1> .ascii: db  "0123456789ABCDEF"      ; ascii-short table
+    99 0000016A 39414243444546      <1>
+   100                              <1> 
+    65                                      %include    "../modules/real/reboot.s"
+     1                              <1> ; reboot
+     2                              <1> 
+     3                              <1> 
+     4                              <1> reboot:
+     5                              <1>     ; display a message
+     6 00000171 68[8D01]E85AFF83C4- <1>     cdecl   puts, .s0
+     6 00000179 02                  <1>
+     7                              <1> 
+     8                              <1>     ; wait for key-input
+     9                              <1> .10L:
+    10 0000017A B410                <1>     mov     ah, 0x10
+    11 0000017C CD16                <1>     int     0x16            ; get key-input
+    12                              <1> 
+    13 0000017E 3C20                <1>     cmp     al, ' '
+    14 00000180 75F8                <1>     jne     .10L
+    15                              <1> 
+    16                              <1>     ; output newline
+    17 00000182 68[AB01]E849FF83C4- <1>     cdecl   puts, .s1
+    17 0000018A 02                  <1>
+    18                              <1> 
+    19                              <1>     ; reboot
+    20 0000018B CD19                <1>     int     0x19
+    21                              <1> 
+    22                              <1> 
+    23 0000018D 0A0D50757368205350- <1> .s0:    db  0x0A, 0x0D, "Push SPACE key to reboot...", 0
+    23 00000196 414345206B65792074- <1>
+    23 0000019F 6F207265626F6F742E- <1>
+    23 000001A8 2E2E00              <1>
+    24 000001AB 0A0D0A0D00          <1> .s1:    db  0x0A, 0x0D, 0x0A, 0x0D, 0
+    66                                  
+    67                                      ; --- boot flag ---
+    68 000001B0 00<rept>                    times   510 - ($ - $$) db 0x00
+    69 000001FE 55AA                        db      0x55, 0xAA              ; boot flag
+    70                                  
+    71                                  
+    72                                  
+    73                                      ; ----------------------------
+    74                                      ; --- 2nd stage of booting ---
+    75                                      ; ----------------------------
+    76                                  stage_2:
+    77 00000200 68[0B02]E8CBFE83C4-         cdecl   puts, .s0
+    77 00000208 02                 
+    78                                  
+    79 00000209 EBFE                        jmp     $                       ; while(1);
+    80                                  
+    81 0000020B 326E64207374616765-     .s0:    db  "2nd stage...", 0x0A, 0x0D, 0
+    81 00000214 2E2E2E0A0D00       
+    82                                  
+    83                                      ; --- padding ---
+    84 0000021A 00<rept>                    times (1024 * 8) - ($- $$)  db  0   ; up to 8K
+    85                                      
