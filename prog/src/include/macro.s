@@ -13,3 +13,11 @@
         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
     %endif
 %endmacro
+
+
+; --- drive struct ---
+struc drive
+    .no     resw    1       ; drive number
+    .cyln   resw    1       ; cylinder
+    .head   resw    1       ; head
+    .sect   resw    1       ; sector
