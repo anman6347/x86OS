@@ -21,3 +21,4 @@ struc drive
     .cyln   resw    1       ; cylinder
     .head   resw    1       ; head
     .sect   resw    1       ; sector
+endstruc
