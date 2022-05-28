@@ -6,7 +6,7 @@
 ; return non-zero on success, and 0 on error 
 
 
-read_chs:
+get_drive_params:
 
     ; build stack frame
     push    bp
