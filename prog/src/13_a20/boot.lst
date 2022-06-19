@@ -1,0 +1,1009 @@
+     1                                      ; --- macro ---
+     2                                      %include    "../include/define.s"
+     1                              <1> ; defines of important constants
+     2                              <1> 
+     3                              <1> BOOT_LOAD   equ     0x7c00                  ; addr where boot program loaded
+     4                              <1> 
+     5                              <1> BOOT_SIZE   equ     (1024 * 8)              ; size of boot code
+     6                              <1> SECT_SIZE   equ     (512)                   ; size of a sector
+     7                              <1> BOOT_SECT   equ     (BOOT_SIZE / SECT_SIZE) ; numbaer of sectors used in boot program
+     8                              <1> 
+     9                              <1> E820_RECORD_SIZE    equ     20              ; the record size (size of buffer for result) used in INT 0x15, EAX = 0xE820
+     3                                      %include    "../include/macro.s"
+     1                              <1> ; --- cdecl ---
+     2                              <1> 
+     3                              <1> %macro cdecl 1-*.nolist
+     4                              <1>     %rep    %0 - 1
+     5                              <1>         push    %{-1:-1}
+     6                              <1>         %rotate -1
+     7                              <1>     %endrep
+     8                              <1>     %rotate -1
+     9                              <1> 
+    10                              <1>     call    %1
+    11                              <1> 
+    12                              <1>     %if 1 < %0          ; delete args
+    13                              <1>         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
+    14                              <1>     %endif
+    15                              <1> %endmacro
+    16                              <1> 
+    17                              <1> 
+    18                              <1> ; --- drive struct ---
+    19                              <1> struc drive
+    20 00000000 <res 00000002>      <1>     .no     resw    1       ; drive number
+    21 00000002 <res 00000002>      <1>     .cyln   resw    1       ; cylinder
+    22 00000004 <res 00000002>      <1>     .head   resw    1       ; head
+    23 00000006 <res 00000002>      <1>     .sect   resw    1       ; sector
+    24                              <1> endstruc
+     4                                  
+     5                                      ORG     BOOT_LOAD
+     6                                  
+     7                                      ; --- entry point ---
+     8                                  entry: 
+     9 00000000 EB58                        jmp     ipl
+    10                                  
+    11                                  
+    12                                      ; --- BIOS Parameter Block ---
+    13 00000002 90<rept>                    times   90 - ($ - $$) db 0x90
+    14                                  
+    15                                  
+    16                                      ; --- Initial Program Loader ---
+    17                                  ipl:
+    18                                  
+    19 0000005A FA                          cli
+    20                                  
+    21 0000005B B80000                      mov     ax, 0x00
+    22 0000005E 8ED8                        mov     ds, ax
+    23 00000060 8EC0                        mov     es, ax
+    24 00000062 8ED0                        mov     ss, ax                      ; ds = es = ss = 0
+    25 00000064 BC007C                      mov     sp, BOOT_LOAD               ; sp = 0x7c00
+    26                                  
+    27 00000067 FB                          sti
+    28                                  
+    29 00000068 8816[B800]                  mov     [BOOT + drive.no],    dl    ; save drive number
+    30                                  
+    31 0000006C 68[9900]E84E0083C4-         cdecl   puts, .s0                   ; write text in teletype mode
+    31 00000074 02                 
+    32                                  
+    33                                  
+    34                                      ; read all the sectors left
+    35 00000075 BB0F00                      mov     bx, BOOT_SECT - 1               ; bx = number of sectors left
+    36 00000078 B9007E                      mov     cx, BOOT_LOAD + SECT_SIZE       ; cx = addr where next sectors will be loaded
+    37 0000007B 515368[B800]E89B00-         cdecl   read_chs, BOOT, bx, cx          ; ax = read_chs(BOOT, bx, cx);
+    37 00000083 83C406             
+    38                                  
+    39 00000086 39D8                        cmp     ax, bx
+    40 00000088 740C                        jz      .10E                    ; if success, jump to .10E
+    41                                  
+    42 0000008A 68[A600]E8300083C4-         cdecl   puts, .e0
+    42 00000092 02                 
+    43 00000093 E84900                      call    reboot
+    44                                  .10E:
+    45                                  
+    46                                      ; transition to the 2nd stage
+    47 00000096 E96902                      jmp     stage_2
+    48                                  
+    49                                  
+    50                                  
+    51 00000099 426F6F74696E672E2E-     .s0:    db  "Booting...", 0x0A, 0x0D, 0x00
+    51 000000A2 2E0A0D00           
+    52 000000A6 4572726F723A736563-     .e0:    db  "Error:sector read", 0x00
+    52 000000AF 746F72207265616400 
+    53                                  
+    54                                      ALIGN 2, db 0
+    55                                  BOOT:
+    56                                      istruc  drive
+    57 000000B8 0000                            at  drive.no,   dw  0   ; drive number
+    58 000000BA 0000                            at  drive.cyln, dw  0   ; cylinder
+    59 000000BC 0000                            at  drive.head, dw  0   ; head
+    60 000000BE 0200                            at  drive.sect, dw  2   ; sector
+    61                                      iend
+    62                                  
+    63                                      ; --- modules ---
+    64                                      %include    "../modules/real/puts.s"
+     1                              <1> ; void puts(int16 straddr)
+     2                              <1> ; write str from head to '\0'
+     3                              <1> 
+     4                              <1> 
+     5                              <1> puts:
+     6                              <1> 
+     7                              <1>     ; build stack frame
+     8 000000C0 55                  <1>     push    bp
+     9 000000C1 89E5                <1>     mov     bp, sp
+    10                              <1> 
+    11                              <1>     ; save registers
+    12 000000C3 50                  <1>     push    ax
+    13 000000C4 53                  <1>     push    bx
+    14 000000C5 56                  <1>     push    si
+    15                              <1> 
+    16                              <1>     ; get arg
+    17 000000C6 8B7604              <1>     mov     si, [bp + 4]    ; si = straddr
+    18                              <1> 
+    19                              <1>     ; write text in teletype mode
+    20 000000C9 B40E                <1>     mov     ah, 0x0E
+    21 000000CB BB0000              <1>     mov     bx, 0x00
+    22 000000CE FC                  <1>     cld                     ; DF = 0    
+    23                              <1> .10L:
+    24 000000CF AC                  <1>     lodsb
+    25 000000D0 3C00                <1>     cmp     al, 0           ; if (*(si++) == 0)
+    26 000000D2 7404                <1>     je      .10E            ; break;
+    27 000000D4 CD10                <1>     int     0x10
+    28 000000D6 EBF7                <1>     jmp     .10L
+    29                              <1> .10E:
+    30                              <1> 
+    31                              <1>     ; return registers
+    32 000000D8 5E                  <1>     pop     si
+    33 000000D9 5B                  <1>     pop     bx
+    34 000000DA 58                  <1>     pop     ax
+    35                              <1> 
+    36                              <1>     ; destroy stack frame
+    37 000000DB 89EC                <1>     mov     sp, bp
+    38 000000DD 5D                  <1>     pop     bp
+    39                              <1> 
+    40 000000DE C3                  <1>     ret
+    65                                      %include    "../modules/real/reboot.s"
+     1                              <1> ; reboot
+     2                              <1> 
+     3                              <1> 
+     4                              <1> reboot:
+     5                              <1>     ; display a message
+     6 000000DF 68[FB00]E8DBFF83C4- <1>     cdecl   puts, .s0
+     6 000000E7 02                  <1>
+     7                              <1> 
+     8                              <1>     ; wait for key-input
+     9                              <1> .10L:
+    10 000000E8 B410                <1>     mov     ah, 0x10
+    11 000000EA CD16                <1>     int     0x16            ; get key-input
+    12                              <1> 
+    13 000000EC 3C20                <1>     cmp     al, ' '
+    14 000000EE 75F8                <1>     jne     .10L
+    15                              <1> 
+    16                              <1>     ; output newline
+    17 000000F0 68[1901]E8CAFF83C4- <1>     cdecl   puts, .s1
+    17 000000F8 02                  <1>
+    18                              <1> 
+    19                              <1>     ; reboot
+    20 000000F9 CD19                <1>     int     0x19
+    21                              <1> 
+    22                              <1> 
+    23 000000FB 0A0D50757368205350- <1> .s0:    db  0x0A, 0x0D, "Push SPACE key to reboot...", 0
+    23 00000104 414345206B65792074- <1>
+    23 0000010D 6F207265626F6F742E- <1>
+    23 00000116 2E2E00              <1>
+    24 00000119 0A0D0A0D00          <1> .s1:    db  0x0A, 0x0D, 0x0A, 0x0D, 0
+    66                                      %include    "../modules/real/read_chs.s"
+     1                              <1> ; int read_chs(int drive, int sect, int dst)
+     2                              <1> ; return number of sectors read
+     3                              <1> ; drive: addr to drive struct
+     4                              <1> ; sect: number of read sectors
+     5                              <1> ; dst: dst addr
+     6                              <1> 
+     7                              <1> ; can't call this func before DS = 0, maybe
+     8                              <1> 
+     9                              <1> 
+    10                              <1> read_chs:
+    11                              <1> 
+    12                              <1>     ; build stack frame
+    13 0000011E 55                  <1>     push    bp
+    14 0000011F 89E5                <1>     mov     bp, sp
+    15 00000121 6A03                <1>     push    3           ; number of retries
+    16 00000123 6A00                <1>     push    0           ; number of sectors read
+    17                              <1> 
+    18                              <1>     ; save registers
+    19 00000125 53                  <1>     push    bx
+    20 00000126 51                  <1>     push    cx
+    21 00000127 52                  <1>     push    dx
+    22 00000128 06                  <1>     push    es
+    23 00000129 56                  <1>     push    si
+    24                              <1> 
+    25                              <1>     ; set cx, dx, es, bx for reading sectors (CHS)
+    26 0000012A 8B7604              <1>     mov     si, [bp + 4]                ; si = addr to drive struct
+    27 0000012D 8A6C02              <1>     mov     ch, [si + drive.cyln] 
+    28 00000130 8A4C03              <1>     mov     cl, [si + drive.cyln + 1]
+    29 00000133 C0E106              <1>     shl     cl, 6
+    30 00000136 0A4C06              <1>     or      cl, [si + drive.sect]
+    31                              <1> 
+    32 00000139 8A7404              <1>     mov     dh, [si + drive.head]
+    33 0000013C 8A14                <1>     mov     dl, [si + 0]
+    34                              <1> 
+    35 0000013E B80000              <1>     mov     ax, 0
+    36 00000141 8EC0                <1>     mov     es, ax
+    37 00000143 8B5E08              <1>     mov     bx, [bp + 8]
+    38                              <1> 
+    39                              <1> .10L:
+    40                              <1>     ; read sectors
+    41 00000146 B402                <1>     mov     ah, 0x02
+    42 00000148 8A4606              <1>     mov     al, [bp + 6]
+    43                              <1> 
+    44 0000014B CD13                <1>     int     0x13
+    45 0000014D 7304                <1>     jnc      .11E        ; if error occured, jump to .11E
+    46 0000014F B000                <1>     mov     al, 0
+    47 00000151 EB0C                <1>     jmp     .10E
+    48                              <1> 
+    49                              <1> .11E:
+    50 00000153 3C00                <1>     cmp     al, 0
+    51 00000155 7508                <1>     jne     .10E        ; if at least one sector was read
+    52                              <1> 
+    53 00000157 B80000              <1>     mov     ax, 0
+    54 0000015A FF4EFE              <1>     dec     word    [bp - 2]    ; retry--
+    55 0000015D 75E7                <1>     jnz     .10L                ; read sectors again
+    56                              <1> 
+    57                              <1> .10E:
+    58                              <1>     ; remove status info
+    59 0000015F B400                <1>     mov     ah, 0
+    60                              <1> 
+    61                              <1>     ; return registers
+    62 00000161 5E                  <1>     pop     si
+    63 00000162 07                  <1>     pop     es
+    64 00000163 5A                  <1>     pop     dx
+    65 00000164 59                  <1>     pop     cx
+    66 00000165 5B                  <1>     pop     bx
+    67                              <1> 
+    68                              <1>     ; destroy stack frame
+    69 00000166 89EC                <1>     mov     sp, bp
+    70 00000168 5D                  <1>     pop     bp
+    71                              <1> 
+    72 00000169 C3                  <1>     ret
+    67                                  
+    68                                  
+    69                                      ; --- boot flag ---
+    70 0000016A 00<rept>                    times   510 - ($ - $$) db 0x00
+    71 000001FE 55AA                        db      0x55, 0xAA              ; boot flag
+    72                                  
+    73                                  
+    74                                      ; ----------------------------
+    75                                      ; informations obtained in real mode
+    76                                      ; ----------------------------
+    77                                  
+    78                                      ; BIOS font data addr
+    79                                  FONT:
+    80 00000200 0000                    .seg    dw  0
+    81 00000202 0000                    .off    dw  0
+    82                                      ; ACPI data address 
+    83                                  ACPI_DATA:
+    84 00000204 00000000                .adr:   dd  0
+    85 00000208 00000000                .len:   dd  0
+    86                                  
+    87                                      ; ----------------------------
+    88                                      ; --- 2nd stage of booting ---
+    89                                      ; ----------------------------
+    90                                  
+    91                                      ; --- modules ---
+    92                                      %include    "../modules/real/putc.s"
+     1                              <1> ; void putc(int16 chcode)
+     2                              <1> 
+     3                              <1> putc:
+     4                              <1> 
+     5                              <1>     ; build stack frame
+     6 0000020C 55                  <1>     push    bp
+     7 0000020D 89E5                <1>     mov     bp, sp
+     8                              <1> 
+     9                              <1>     ; save registers
+    10 0000020F 50                  <1>     push    ax
+    11 00000210 53                  <1>     push    bx
+    12                              <1> 
+    13                              <1> 
+    14                              <1>     ; write text in teletype mode
+    15 00000211 8A4604              <1>     mov     al, [bp + 4]
+    16 00000214 B40E                <1>     mov     ah, 0x0E
+    17 00000216 BB0000              <1>     mov     bx, 0x00
+    18 00000219 CD10                <1>     int     0x10
+    19                              <1> 
+    20                              <1> 
+    21                              <1>     ; return registers
+    22 0000021B 5B                  <1>     pop     bx
+    23 0000021C 58                  <1>     pop     ax
+    24                              <1> 
+    25                              <1>     ; destroy stack frame
+    26 0000021D 89EC                <1>     mov     sp, bp
+    27 0000021F 5D                  <1>     pop     bp
+    28                              <1> 
+    29 00000220 C3                  <1>     ret
+    93                                      %include    "../modules/real/itoa.s"
+     1                              <1> ; void itos(int num, char* buf, int size, int radix, int flags);
+     2                              <1> ; flags = 1 : num is used as signed
+     3                              <1> ; flags = 2 : display plus/minus sign
+     4                              <1> ; flags = 4 : fill in the space with 0
+     5                              <1> 
+     6                              <1> 
+     7                              <1> itoa:
+     8                              <1>     ; build stack frame
+     9 00000221 55                  <1>     push    bp
+    10 00000222 89E5                <1>     mov     bp, sp
+    11                              <1> 
+    12                              <1>     ; save registers' data
+    13 00000224 50                  <1>     push    ax
+    14 00000225 53                  <1>     push    bx
+    15 00000226 51                  <1>     push    cx
+    16 00000227 52                  <1>     push    dx
+    17 00000228 56                  <1>     push    si
+    18 00000229 57                  <1>     push    di
+    19                              <1> 
+    20                              <1>     ; get args
+    21 0000022A 8B4604              <1>     mov     ax, [bp + 4]    ; ax = num;
+    22 0000022D 8B7606              <1>     mov     si, [bp + 6]    ; si = buf;
+    23 00000230 8B4E08              <1>     mov     cx, [bp + 8]    ; cx = size;
+    24                              <1> 
+    25 00000233 89F7                <1>     mov     di, si
+    26 00000235 01CF                <1>     add     di, cx
+    27 00000237 4F                  <1>     dec     di              ; di = &(buf[size - 1]);
+    28                              <1> 
+    29 00000238 8B5E0C              <1>     mov     bx, [bp + 12]   ; bx = flags;
+    30                              <1> 
+    31                              <1>     ; positive/negative judgement
+    32 0000023B F7C30100            <1>     test    bx, 0b0001      ; if (flags & 0x01)
+    33 0000023F 7408                <1>     je      .10E
+    34 00000241 83F800              <1>     cmp     ax, 0           ;   if (num < 0)
+    35 00000244 7D03                <1>     jge     .12E
+    36 00000246 83CB02              <1>     or      bx, 0b0010      ;       flags |= 2;
+    37                              <1> .10E:
+    38                              <1> .12E:
+    39                              <1> 
+    40                              <1>     ; which sould be displayed pos/neg ?
+    41 00000249 F7C30200            <1>     test    bx, 0b0010
+    42 0000024D 7410                <1>     je      .20E
+    43 0000024F 83F800              <1>     cmp     ax, 0
+    44 00000252 7D07                <1>     jge     .22F
+    45 00000254 F7D8                <1>     neg     ax              ; num *= -1;
+    46 00000256 C6042D              <1>     mov     [si], byte '-'  ; buf[0] = '-';
+    47 00000259 EB03                <1>     jmp     .22E
+    48                              <1> .22F:
+    49 0000025B C6042B              <1>     mov     [si], byte '+'
+    50                              <1> .22E:
+    51 0000025E 49                  <1>     dec     cx
+    52                              <1> .20E:
+    53                              <1> 
+    54                              <1> 
+    55                              <1>     ; convert num to ASCII
+    56 0000025F 8B5E0A              <1>     mov     bx, [bp + 10]           ; bx = radix
+    57                              <1> .30L:
+    58 00000262 BA0000              <1>     mov     dx, 0
+    59 00000265 F7F3                <1>     div     bx                      ; ax = dx:ax % bx,;     dx = dx:ax % bx;
+    60                              <1> 
+    61 00000267 89D6                <1>     mov     si, dx
+    62 00000269 8A94[9202]          <1>     mov     dl, byte [.ascii + si]  ; dl = ascii[si];
+    63                              <1> 
+    64 0000026D 8815                <1>     mov     [di], dl                ; buf[size - i]
+    65 0000026F 4F                  <1>     dec     di
+    66                              <1> 
+    67 00000270 83F800              <1>     cmp     ax, 0
+    68 00000273 E0ED                <1>     loopnz  .30L
+    69                              <1> 
+    70                              <1> 
+    71                              <1>     ; fill in the space
+    72 00000275 83F900              <1>     cmp     cx, 0
+    73 00000278 740E                <1>     je      .40E
+    74 0000027A B020                <1>     mov     al, ' '
+    75 0000027C F7460C0400          <1>     test    [bp + 12], word 0b0100  ; if (flags & 0x04)
+    76 00000281 7402                <1>     je     .42E
+    77 00000283 B030                <1>     mov     al, '0'
+    78                              <1> .42E:
+    79 00000285 FD                  <1>     std                             ; DF = 1 (- direction)
+    80 00000286 F3AA                <1>     rep stosb                       ; while(--cx) [di--] = al;
+    81                              <1> .40E:
+    82                              <1> 
+    83                              <1> 
+    84                              <1>     ; return registers' data
+    85 00000288 5F                  <1>     pop     di
+    86 00000289 5E                  <1>     pop     si
+    87 0000028A 5A                  <1>     pop     dx
+    88 0000028B 59                  <1>     pop     cx
+    89 0000028C 5B                  <1>     pop     bx
+    90 0000028D 58                  <1>     pop     ax
+    91                              <1> 
+    92                              <1>     ; destroy stack frame
+    93 0000028E 89EC                <1>     mov     sp, bp
+    94 00000290 5D                  <1>     pop     bp
+    95                              <1> 
+    96 00000291 C3                  <1>     ret
+    97                              <1> 
+    98                              <1> 
+    99 00000292 303132333435363738- <1> .ascii: db  "0123456789ABCDEF"      ; ascii-short table
+    99 0000029B 39414243444546      <1>
+   100                              <1> 
+    94                                      %include    "../modules/real/get_drive_params.s"
+     1                              <1> ; int get_drive_param(int drive)
+     2                              <1> 
+     3                              <1> ; set maximam accessible number of sectors, cylinders and heads coressponding drive number
+     4                              <1> 
+     5                              <1> ; drive: addr to drive struct
+     6                              <1> ; return non-zero on success, and 0 on error 
+     7                              <1> 
+     8                              <1> 
+     9                              <1> get_drive_params:
+    10                              <1> 
+    11                              <1>     ; build stack frame
+    12 000002A2 55                  <1>     push    bp
+    13 000002A3 89E5                <1>     mov     bp, sp
+    14                              <1> 
+    15                              <1>     ; save registers
+    16 000002A5 53                  <1>     push    bx
+    17 000002A6 51                  <1>     push    cx
+    18 000002A7 06                  <1>     push    es
+    19 000002A8 56                  <1>     push    si
+    20 000002A9 57                  <1>     push    di
+    21                              <1> 
+    22                              <1>     
+    23 000002AA 8B7604              <1>     mov     si, [bp + 4]                ; si = addr to drive struct
+    24                              <1> 
+    25                              <1>     ; initialize Disk Base Table pointer
+    26 000002AD B80000              <1>     mov     ax, 0
+    27 000002B0 8EC0                <1>     mov     es, ax
+    28 000002B2 89C7                <1>     mov     di, ax
+    29                              <1> 
+    30                              <1>     ; get current drive parameters
+    31 000002B4 B408                <1>     mov     ah, 8
+    32 000002B6 8A14                <1>     mov     dl, [si + drive.no]
+    33 000002B8 CD13                <1>     int     0x13
+    34 000002BA 721A                <1>     jc      .10F
+    35                              <1>     ; success
+    36 000002BC 88C8                <1>     mov     al, cl
+    37 000002BE 243F                <1>     and     al, 0x3F        ; ax = number of sectors
+    38                              <1> 
+    39 000002C0 C0E906              <1>     shr     cl, 6
+    40 000002C3 C1C908              <1>     ror     cx, 8
+    41 000002C6 41                  <1>     inc     cx              ; cx = number of cylinders
+    42                              <1> 
+    43 000002C7 0FB6DE              <1>     movzx   bx, dh
+    44 000002CA 43                  <1>     inc     bx              ; bx = number of heads
+    45                              <1> 
+    46 000002CB 894406              <1>     mov     [si + drive.sect], ax
+    47 000002CE 894C02              <1>     mov     [si + drive.cyln], cx
+    48 000002D1 895C04              <1>     mov     [si + drive.head], bx
+    49                              <1> 
+    50 000002D4 EB03                <1>     jmp     .10E
+    51                              <1>     ; error
+    52                              <1> .10F:
+    53 000002D6 B80000              <1>     mov     ax, 0
+    54                              <1> 
+    55                              <1> 
+    56                              <1> .10E:
+    57                              <1>     ; return registers
+    58 000002D9 5F                  <1>     pop     di
+    59 000002DA 5E                  <1>     pop     si
+    60 000002DB 07                  <1>     pop     es
+    61 000002DC 59                  <1>     pop     cx
+    62 000002DD 5B                  <1>     pop     bx
+    63                              <1> 
+    64                              <1>     ; destroy stack frame
+    65 000002DE 89EC                <1>     mov     sp, bp
+    66 000002E0 5D                  <1>     pop     bp
+    67                              <1> 
+    68 000002E1 C3                  <1>     ret
+    95                                      %include    "../modules/real/get_font_adr.s"
+     1                              <1> ; void get_font_adr(long adr);
+     2                              <1> ; adr = addr to BIOS font data
+     3                              <1> 
+     4                              <1> get_font_data:
+     5                              <1> 
+     6                              <1>     ; build stack frame
+     7 000002E2 55                  <1>     push    bp
+     8 000002E3 89E5                <1>     mov     bp, sp
+     9                              <1> 
+    10                              <1>     ; save registers
+    11 000002E5 50                  <1>     push    ax
+    12 000002E6 53                  <1>     push    bx
+    13 000002E7 56                  <1>     push    si
+    14 000002E8 06                  <1>     push    es
+    15 000002E9 55                  <1>     push    bp
+    16                              <1> 
+    17                              <1>     ; get the arg
+    18 000002EA 8B7604              <1>     mov     si, [bp + 4]
+    19                              <1>     
+    20                              <1>     ; get BIOS font addr
+    21 000002ED B83011              <1>     mov     ax, 0x1130      ; get current character generator information
+    22 000002F0 B706                <1>     mov     bh, 0x06        ; 8x16 character
+    23 000002F2 CD10                <1>     int     10h             ; ES:BP = font addr
+    24                              <1> 
+    25                              <1>     ; save font address
+    26 000002F4 8C04                <1>     mov     [si + 0], es    ; segment
+    27 000002F6 896C02              <1>     mov     [si + 2], bp    ; offset
+    28                              <1> 
+    29                              <1>     ; return registers
+    30 000002F9 5D                  <1>     pop     bp
+    31 000002FA 07                  <1>     pop     es
+    32 000002FB 5E                  <1>     pop     si
+    33 000002FC 5B                  <1>     pop     bx
+    34 000002FD 58                  <1>     pop     ax
+    35                              <1> 
+    36                              <1>     ; destroy stack frame
+    37 000002FE 89EC                <1>     mov     sp, bp
+    38 00000300 5D                  <1>     pop     bp
+    39                              <1> 
+    40 00000301 C3                  <1>     ret
+    96                                  
+    97                                  stage_2:
+    98 00000302 68[7D03]E8B8FD83C4-         cdecl   puts, .s0               ; display a message
+    98 0000030A 02                 
+    99                                  
+   100                                      ; get drive params
+   101 0000030B 68[B800]E891FF83C4-         cdecl   get_drive_params, BOOT
+   101 00000313 02                 
+   102 00000314 83F800                      cmp     ax, 0
+   103 00000317 750C                        jne     .10E
+   104 00000319 68[B403]E8A1FD83C4-         cdecl   puts, .e0               ; display an error message
+   104 00000321 02                 
+   105 00000322 E8BAFD                      call    reboot
+   106                                  .10E:
+   107                                      ; display information of drive params
+   108 00000325 A1[B800]                    mov     ax, [BOOT + drive.no]
+   109 00000328 6A046A106A0268-             cdecl   itoa, ax, .p1, 2, 16, 0b0100
+   109 0000032F [9503]50E8ECFE83C4-
+   109 00000337 0A                 
+   110 00000338 A1[BA00]                    mov     ax, [BOOT + drive.cyln]
+   111 0000033B 6A046A106A0468-             cdecl   itoa, ax, .p2, 4, 16, 0b0100
+   111 00000342 [9D03]50E8D9FE83C4-
+   111 0000034A 0A                 
+   112 0000034B A1[BC00]                    mov     ax, [BOOT + drive.head]
+   113 0000034E 6A046A106A0268-             cdecl   itoa, ax, .p3, 2, 16, 0b0100
+   113 00000355 [A703]50E8C6FE83C4-
+   113 0000035D 0A                 
+   114 0000035E A1[BE00]                    mov     ax, [BOOT + drive.sect]
+   115 00000361 6A046A106A0268-             cdecl   itoa, ax, .p4, 2, 16, 0b0100
+   115 00000368 [AF03]50E8B3FE83C4-
+   115 00000370 0A                 
+   116 00000371 68[8C03]E849FD83C4-         cdecl   puts, .s1                       ; puts(.s1 ~ .p4)
+   116 00000379 02                 
+   117                                  
+   118                                      ; transition to the 3rd stage
+   119 0000037A E9FF02                      jmp     stage_3rd
+   120                                  
+   121 0000037D 326E64207374616765-     .s0:    db  "2nd stage...", 0x0A, 0x0D, 0
+   121 00000386 2E2E2E0A0D00       
+   122                                  
+   123 0000038C 2044726976653A3078      .s1:    db  " Drive:0x"
+   124 00000395 20202C20433A3078        .p1:    db  "  , C:0x"
+   125 0000039D 202020202C20483A30-     .p2:    db  "    , H:0x"
+   125 000003A6 78                 
+   126 000003A7 20202C20533A3078        .p3:    db  "  , S:0x"
+   127 000003AF 20200A0D00              .p4:    db  "  ", 0x0A, 0x0D, 0
+   128                                  
+   129 000003B4 43616E277420676574-     .e0:    db  "Can't get drive parameter.", 0
+   129 000003BD 206472697665207061-
+   129 000003C6 72616D657465722E00 
+   130                                  
+   131                                  
+   132                                      ; ----------------------------
+   133                                      ; --- 3rd stage of booting ---
+   134                                      ; ----------------------------
+   135                                  
+   136                                      ; --- modules ---
+   137                                      %include    "../modules/real/get_mem_info.s"
+     1                              <1> ; void get_mem_info(void)
+     2                              <1> ; get mem info using INT 0x15, EAX = 0xE820, and store ACPI info in ACPI_DATA in the global area
+     3                              <1> 
+     4                              <1> 
+     5                              <1> get_mem_info:
+     6                              <1> 
+     7                              <1>     ; save registers
+     8 000003CF 6650                <1>     push    eax
+     9 000003D1 6653                <1>     push    ebx
+    10 000003D3 6651                <1>     push    ecx
+    11 000003D5 6652                <1>     push    edx
+    12 000003D7 56                  <1>     push    si
+    13 000003D8 57                  <1>     push    di
+    14 000003D9 55                  <1>     push    bp
+    15                              <1> 
+    16 000003DA 68[6E04]E8E0FC83C4- <1>     cdecl   puts, .s0
+    16 000003E2 02                  <1>
+    17 000003E3 BD0000              <1>     mov     bp, 0                       ; line = 0;
+    18 000003E6 66BB00000000        <1>     mov     ebx, 0                      ; continuation value or zero to start at beginning of map
+    19                              <1> .10L:                                                                                   ; do {
+    20 000003EC 66B820E80000        <1>     mov     eax, 0xE820
+    21 000003F2 66B914000000        <1>     mov     ecx, E820_RECORD_SIZE       ; size of buffer for result, in bytes
+    22 000003F8 66BA50414D53        <1>     mov     edx, 'PAMS'                 ; edx = 'SMAP'
+    23 000003FE BF[F804]            <1>     mov     di, .b0                     ; ES:DI -> buffer for result
+    24 00000401 CD15                <1>     int     0x15                        ; Newer BIOSes - GET SYSTEM MEMORY MAP
+    25                              <1> 
+    26                              <1>     ; Is the BIOS support this interrupt service?
+    27 00000403 663D50414D53        <1>     cmp     eax, 'PAMS'
+    28 00000409 7402                <1>     je      .12E
+    29 0000040B EB4C                <1>     jmp     .10E
+    30                              <1> .12E:
+    31                              <1>     ; error check
+    32 0000040D 7302                <1>     jnc     .14E
+    33 0000040F EB48                <1>     jmp     .10E
+    34                              <1> 
+    35                              <1> .14E:
+    36 00000411 57E8F70083C402      <1>     cdecl   put_mem_info, di            ; display mem info of one record
+    37                              <1> 
+    38                              <1>     ; get addrs of ACPI data 
+    39 00000418 668B4510            <1>     mov     eax, [di + 16]              ; eax = data type
+    40 0000041C 6683F803            <1>     cmp     eax, 3                      ; Is data type ACPI Reclaim Memory?
+    41 00000420 750F                <1>     jne     .15E
+    42                              <1> 
+    43 00000422 668B05              <1>     mov     eax, [di + 0]
+    44 00000425 66A3[0402]          <1>     mov     [ACPI_DATA.adr], eax        ; base addr
+    45                              <1> 
+    46 00000429 668B4508            <1>     mov     eax, [di + 8]
+    47 0000042D 66A3[0802]          <1>     mov     [ACPI_DATA.len], eax        ; length
+    48                              <1> 
+    49                              <1> .15E:
+    50                              <1>     ; display a message per 8 lines to prevent the screen from being refleshed
+    51 00000431 6683FB00            <1>     cmp     ebx, 0                      ; all done?
+    52 00000435 741C                <1>     jz      .16E
+    53                              <1> 
+    54 00000437 45                  <1>     inc     bp                          ; line++;
+    55 00000438 83E507              <1>     and     bp, 0x07
+    56 0000043B 7516                <1>     jnz     .16E
+    57                              <1>     ; display a message
+    58 0000043D 68[E104]E87DFC83C4- <1>     cdecl   puts, .s2
+    58 00000445 02                  <1>
+    59                              <1> 
+    60 00000446 B410                <1>     mov     ah, 0x10
+    61 00000448 CD16                <1>     int     0x16                        ; waiting for key-in
+    62                              <1> 
+    63 0000044A 68[EC04]E870FC83C4- <1>     cdecl   puts, .s3                   ; remove the message 
+    63 00000452 02                  <1>
+    64                              <1> 
+    65                              <1> .16E:
+    66 00000453 6683FB00            <1>     cmp     ebx, 0
+    67 00000457 7593                <1>     jne     .10L                                                                                ; } while(0 != ebx)
+    68                              <1> 
+    69                              <1> 
+    70                              <1> .10E:
+    71 00000459 68[B104]E861FC83C4- <1>     cdecl   puts, .s1
+    71 00000461 02                  <1>
+    72                              <1> 
+    73                              <1>     ; return registers
+    74 00000462 5D                  <1>     pop     bp
+    75 00000463 5F                  <1>     pop     di
+    76 00000464 5E                  <1>     pop     si
+    77 00000465 665A                <1>     pop     edx
+    78 00000467 6659                <1>     pop     ecx
+    79 00000469 665B                <1>     pop     ebx
+    80 0000046B 6658                <1>     pop     eax
+    81                              <1> 
+    82                              <1> 
+    83 0000046D C3                  <1>     ret
+    84                              <1> 
+    85                              <1> 
+    86 0000046E 2045383230204D656D- <1> .s0:	db " E820 Memory Map:", 0x0A, 0x0D
+    86 00000477 6F7279204D61703A0A- <1>
+    86 00000480 0D                  <1>
+    87 00000481 20426173655F5F5F5F- <1> 		db " Base_____________ Length___________ Type____", 0x0A, 0x0D, 0
+    87 0000048A 5F5F5F5F5F5F5F5F5F- <1>
+    87 00000493 204C656E6774685F5F- <1>
+    87 0000049C 5F5F5F5F5F5F5F5F5F- <1>
+    87 000004A5 20547970655F5F5F5F- <1>
+    87 000004AE 0A0D00              <1>
+    88 000004B1 202D2D2D2D2D2D2D2D- <1> .s1:	db " ----------------- ----------------- --------", 0x0A, 0x0D, 0
+    88 000004BA 2D2D2D2D2D2D2D2D2D- <1>
+    88 000004C3 202D2D2D2D2D2D2D2D- <1>
+    88 000004CC 2D2D2D2D2D2D2D2D2D- <1>
+    88 000004D5 202D2D2D2D2D2D2D2D- <1>
+    88 000004DE 0A0D00              <1>
+    89 000004E1 203C6D6F72652E2E2E- <1> .s2:    db  " <more...>", 0
+    89 000004EA 3E00                <1>
+    90 000004EC 0D2020202020202020- <1> .s3:    db  0x0D, "        ", 0x0D, 0
+    90 000004F5 0D00                <1>
+    91                              <1> 
+    92 000004F7 00                  <1> ALIGN 4,    db  0
+    93 000004F8 00<rept>            <1> .b0:    times   E820_RECORD_SIZE    db  0   ; system memmap buffer
+    94                              <1> 
+    95                              <1> 
+    96                              <1> ; void put_mem_info(int16 addr)
+    97                              <1> ; nested func
+    98                              <1> 
+    99                              <1> put_mem_info:
+   100                              <1> 
+   101                              <1>     ; build stack frame
+   102 0000050C 55                  <1>     push    bp
+   103 0000050D 89E5                <1>     mov     bp, sp
+   104                              <1> 
+   105                              <1>     ; save registers
+   106 0000050F 53                  <1>     push    bx
+   107 00000510 56                  <1>     push    si
+   108                              <1> 
+   109                              <1>     ; get addr
+   110 00000511 8B7604              <1>     mov     si, [bp + 4]
+   111                              <1> 
+   112                              <1>     ; convert mem info from int to str
+   113                              <1>     ; Base(64bit)
+   114 00000514 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 6], .s2 + 0, 4, 16, 0b0100
+   114 0000051B [EB05]FF7406E8FEFC- <1>
+   114 00000523 83C40A              <1>
+   115 00000526 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 4], .s2 + 4, 4, 16, 0b0100
+   115 0000052D [EF05]FF7404E8ECFC- <1>
+   115 00000535 83C40A              <1>
+   116 00000538 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 2], .s3 + 0, 4, 16, 0b0100
+   116 0000053F [F405]FF7402E8DAFC- <1>
+   116 00000547 83C40A              <1>
+   117 0000054A 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 0], .s3 + 4, 4, 16, 0b0100
+   117 00000551 [F805]FF34E8C9FC83- <1>
+   117 00000559 C40A                <1>
+   118                              <1>     ; Length(64bit)
+   119 0000055B 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 14], .s4 + 0, 4, 16, 0b0100
+   119 00000562 [FD05]FF740EE8B7FC- <1>
+   119 0000056A 83C40A              <1>
+   120 0000056D 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 12], .s4 + 4, 4, 16, 0b0100
+   120 00000574 [0106]FF740CE8A5FC- <1>
+   120 0000057C 83C40A              <1>
+   121 0000057F 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 10], .s5 + 0, 4, 16, 0b0100
+   121 00000586 [0606]FF740AE893FC- <1>
+   121 0000058E 83C40A              <1>
+   122 00000591 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 8],  .s5 + 4, 4, 16, 0b0100
+   122 00000598 [0A06]FF7408E881FC- <1>
+   122 000005A0 83C40A              <1>
+   123                              <1>     ; Type(32bit)
+   124 000005A3 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 18], .s6 + 0, 4, 16, 0b0100
+   124 000005AA [0F06]FF7412E86FFC- <1>
+   124 000005B2 83C40A              <1>
+   125 000005B5 6A046A106A0468-     <1>     cdecl   itoa, word  [si + 16], .s6 + 4, 4, 16, 0b0100
+   125 000005BC [1306]FF7410E85DFC- <1>
+   125 000005C4 83C40A              <1>
+   126                              <1> 
+   127 000005C7 68[EA05]E8F3FA83C4- <1>     cdecl   puts, .s1   ; display mem info(Base, Length)
+   127 000005CF 02                  <1>
+   128                              <1> 
+   129 000005D0 8B5C10              <1>     mov     bx, [si + 16]
+   130 000005D3 83E307              <1>     and     bx, 0x07            ; bx = type 0 ~ 5;
+   131 000005D6 D1E3                <1>     shl     bx, 1               ; bx *= 2;
+   132 000005D8 81C3[6C06]          <1>     add     bx, .tpstrlist      ; bx += .tpstrlist
+   133 000005DC FF37E8DFFA83C402    <1>     cdecl   puts, word [bx]
+   134                              <1> 
+   135                              <1> 
+   136                              <1>     ; return registers
+   137 000005E4 5E                  <1>     pop     si
+   138 000005E5 5B                  <1>     pop     bx
+   139                              <1> 
+   140                              <1>     ; destroy stack frame
+   141 000005E6 89EC                <1>     mov     sp, bp
+   142 000005E8 5D                  <1>     pop     bp
+   143                              <1> 
+   144 000005E9 C3                  <1>     ret
+   145                              <1> 
+   146                              <1> 
+   147 000005EA 20                  <1> .s1:    db  " "
+   148 000005EB 5A5A5A5A5A5A5A5A5F  <1> .s2:    db  "ZZZZZZZZ_"
+   149 000005F4 5A5A5A5A5A5A5A5A20  <1> .s3:    db  "ZZZZZZZZ "
+   150 000005FD 5A5A5A5A5A5A5A5A5F  <1> .s4:    db  "ZZZZZZZZ_"
+   151 00000606 5A5A5A5A5A5A5A5A20  <1> .s5:    db  "ZZZZZZZZ "
+   152 0000060F 5A5A5A5A5A5A5A5A00  <1> .s6:    db  "ZZZZZZZZ", 0
+   153                              <1> 
+   154 00000618 2028556E6B6E6F776E- <1> .t0:    db  " (Unknown)", 0x0A, 0x0D, 0
+   154 00000621 290A0D00            <1>
+   155 00000625 2028757361626C6529- <1> .t1:    db  " (usable)", 0x0A, 0x0D, 0
+   155 0000062E 0A0D00              <1>
+   156 00000631 202872657365727665- <1> .t2:    db  " (reserved)", 0x0A, 0x0D, 0
+   156 0000063A 64290A0D00          <1>
+   157 0000063F 202841435049206461- <1> .t3:    db  " (ACPI data)", 0x0A, 0x0D, 0
+   157 00000648 7461290A0D00        <1>
+   158 0000064E 202841435049204E56- <1> .t4:    db  " (ACPI NVS)", 0x0A, 0x0D, 0
+   158 00000657 53290A0D00          <1>
+   159 0000065C 2028626164206D656D- <1> .t5:    db  " (bad memory)", 0x0A, 0x0D, 0
+   159 00000665 6F7279290A0D00      <1>
+   160                              <1> 
+   161 0000066C [1806][2506][3106]- <1> .tpstrlist: dw  .t0, .t1, .t2, .t3, .t4, .t5, .t0, .t0      ; each of these addresses is 16bit(real mode)
+   161 00000672 [3F06][4E06][5C06]- <1>
+   161 00000678 [1806][1806]        <1>
+   138                                  
+   139                                  stage_3rd:
+   140 0000067C 68[FA06]E83EFA83C4-         cdecl   puts, .s0               ; display a message
+   140 00000684 02                 
+   141                                  
+   142                                      ; get BIOS font data
+   143 00000685 68[0002]E857FC83C4-         cdecl   get_font_data, FONT
+   143 0000068D 02                 
+   144                                  
+   145                                      ; display font addr
+   146 0000068E 6A046A106A0468-             cdecl   itoa, word[FONT.seg], .p1, 4, 16, 0b0100
+   146 00000695 [1707]FF36[0002]E8-
+   146 0000069C 83FB83C40A         
+   147 000006A1 6A046A106A0468-             cdecl   itoa, word[FONT.off], .p2, 4, 16, 0b0100
+   147 000006A8 [1C07]FF36[0202]E8-
+   147 000006AF 70FB83C40A         
+   148 000006B4 68[0907]E806FA83C4-         cdecl   puts, .s1
+   148 000006BC 02                 
+   149                                  
+   150                                      ; display mem info
+   151 000006BD E80FFD                      cdecl   get_mem_info
+   152                                  
+   153 000006C0 66A1[0402]                  mov     eax, [ACPI_DATA.adr]    ; 32bit
+   154 000006C4 6683F800                    cmp     eax, 0
+   155 000006C8 742D                        je      .10E
+   156 000006CA 6A046A106A0468-             cdecl   itoa, ax, .p4, 4, 16, 0b0100
+   156 000006D1 [3407]50E84AFB83C4-
+   156 000006D9 0A                 
+   157 000006DA 66C1E810                    shr     eax, 16
+   158 000006DE 6A046A106A0468-             cdecl   itoa, ax, .p3, 4, 16, 0b0100
+   158 000006E5 [3007]50E836FB83C4-
+   158 000006ED 0A                 
+   159                                  
+   160 000006EE 68[2507]E8CCF983C4-         cdecl   puts, .s2
+   160 000006F6 02                 
+   161                                  
+   162                                  .10E:
+   163                                      ; transition to the 4th stage
+   164 000006F7 E9A000                      jmp     stage_4
+   165                                  
+   166                                  
+   167 000006FA 337264207374616765-     .s0:    db  "3rd stage...", 0x0A, 0x0D, 0
+   167 00000703 2E2E2E0A0D00       
+   168 00000709 20466F6E7420416464-     .s1:    db  " Font Address="
+   168 00000712 726573733D         
+   169 00000717 5A5A5A5A3A              .p1:    db  "ZZZZ:"
+   170 0000071C 5A5A5A5A0A0D            .p2:    db  "ZZZZ", 0x0A, 0x0D
+   171 00000722 0A0D00                          db  0x0A, 0x0D, 0
+   172                                  
+   173 00000725 204143504920646174-     .s2:    db  " ACPI data="
+   173 0000072E 613D               
+   174 00000730 5A5A5A5A                .p3:    db  "ZZZZ"
+   175 00000734 5A5A5A5A0A0D            .p4:    db  "ZZZZ", 0x0A, 0x0D
+   176                                  
+   177                                  
+   178                                      ; ----------------------------
+   179                                      ; --- 4th stage of booting ---
+   180                                      ; ----------------------------
+   181                                  
+   182                                      ; --- modules ---
+   183                                      %include    "../modules/real/kbc.s"
+     1                              <1> ; definitions of
+     2                              <1> ; int16 KBC_Data_Write(int16 input_data),
+     3                              <1> ; int16 KBC_Data_Read(int16 output_adr),
+     4                              <1> ; int16 KBC_Cmd_Write(int16 cmd)
+     5                              <1> 
+     6                              <1> ; --------------------------------------
+     7                              <1> ; int16 KBC_Data_Write(int16 input_data)
+     8                              <1> ; return non-zero on success, and 0 on error 
+     9                              <1> ; input_data : input_data for the buffer in KBC
+    10                              <1> 
+    11                              <1> 
+    12                              <1> KBC_Data_Write:
+    13                              <1> 
+    14                              <1>     ; build stack frame
+    15 0000073A 55                  <1>     push    bp
+    16 0000073B 89E5                <1>     mov     bp, sp
+    17                              <1> 
+    18                              <1>     ; save registers
+    19 0000073D 51                  <1>     push    cx
+    20                              <1> 
+    21 0000073E B90000              <1>     mov     cx, 0           ; cnt = 0;
+    22                              <1> .10L:                       ; do {
+    23 00000741 E464                <1>     in      al, 0x64            ; get KBC status
+    24                              <1> 
+    25 00000743 A802                <1>     test    al, 0x02            ; check input buffer status
+    26                              <1>                                 ; must be clear before attempting to write data to IO port 0x60 or IO port 0x64
+    27 00000745 E0FA                <1>     loopnz  .10L            ; } while (--CX && !ZF);
+    28                              <1> 
+    29 00000747 83F900              <1>     cmp     cx, 0           ; if cnt == 0 again, it means time-out
+    30 0000074A 7405                <1>     jz      .20E            ; if (CX) {
+    31 0000074C 8A4604              <1>     mov     al, [bp + 4]        ; AL = input_data;
+    32 0000074F E660                <1>     out     0x60, al            ; outp(0x60, AL);
+    33                              <1>                             ; }
+    34                              <1> 
+    35                              <1> .20E:
+    36 00000751 89C8                <1>     mov     ax, cx          ; return CX;
+    37                              <1> 
+    38                              <1>     ; return registers
+    39 00000753 59                  <1>     pop     cx
+    40                              <1> 
+    41                              <1>     ; destroy stack frame
+    42 00000754 89EC                <1>     mov     sp, bp
+    43 00000756 5D                  <1>     pop     bp
+    44                              <1> 
+    45 00000757 C3                  <1>     ret
+    46                              <1> 
+    47                              <1> 
+    48                              <1> ; -----------------------------------
+    49                              <1> ; int16 KBC_Data_Read(int16 output_adr)
+    50                              <1> ; return non-zero on success, and 0 on error 
+    51                              <1> ; output_adr : adr for the data read from KBC buffer
+    52                              <1> 
+    53                              <1> KBC_Data_Read:
+    54                              <1> 
+    55                              <1>     ; build stack frame
+    56 00000758 55                  <1>     push    bp
+    57 00000759 89E5                <1>     mov     bp, sp
+    58                              <1> 
+    59                              <1>     ; save registers
+    60 0000075B 51                  <1>     push    cx
+    61 0000075C 57                  <1>     push    di
+    62                              <1> 
+    63 0000075D B90000              <1>     mov     cx, 0           ; cnt = 0;
+    64                              <1> .10L:                       ; do {
+    65 00000760 E464                <1>     in      al, 0x64            ; get KBC status
+    66                              <1> 
+    67 00000762 A801                <1>     test    al, 0x01            ; check output buffer status
+    68                              <1>                                 ; must be set before attempting to read data from IO port 0x60
+    69 00000764 E1FA                <1>     loopz   .10L            ; } while (--CX && ZF);
+    70                              <1> 
+    71 00000766 83F900              <1>     cmp     cx, 0           ; if cnt == 0 again, it means time-out
+    72 00000769 7409                <1>     jz      .20E            ; if (CX) {
+    73 0000076B B400                <1>     mov     ah, 0x00
+    74 0000076D E460                <1>     in      al, 0x60            ; AL = inp(0x60);
+    75                              <1>     
+    76 0000076F 8B7E04              <1>     mov     di, [bp + 4]        ; DI = output_adr;
+    77 00000772 8905                <1>     mov     [di + 0], ax        ; *DI = AX;
+    78                              <1>                             ; }
+    79                              <1> 
+    80                              <1> .20E:
+    81 00000774 89C8                <1>     mov     ax, cx          ; return CX;
+    82                              <1> 
+    83                              <1>     ; return registers
+    84 00000776 5F                  <1>     pop     di
+    85 00000777 59                  <1>     pop     cx
+    86                              <1> 
+    87                              <1>     ; destroy stack frame
+    88 00000778 89EC                <1>     mov     sp, bp
+    89 0000077A 5D                  <1>     pop     bp
+    90                              <1> 
+    91 0000077B C3                  <1>     ret
+    92                              <1> 
+    93                              <1> 
+    94                              <1> ; ------------------------------
+    95                              <1> ; int16 KBC_Cmd_Write(int16 cmd)
+    96                              <1> ; return non-zero on success, and 0 on error 
+    97                              <1> ; cmd : command sending to KBC
+    98                              <1> 
+    99                              <1> KBC_Cmd_Write:
+   100                              <1> 
+   101                              <1>     ; build stack frame
+   102 0000077C 55                  <1>     push    bp
+   103 0000077D 89E5                <1>     mov     bp, sp
+   104                              <1> 
+   105                              <1>     ; save registers
+   106 0000077F 51                  <1>     push    cx
+   107                              <1> 
+   108 00000780 B90000              <1>     mov     cx, 0           ; cnt = 0;
+   109                              <1> .10L:                       ; do {
+   110 00000783 E464                <1>     in      al, 0x64            ; get KBC status
+   111                              <1> 
+   112 00000785 A802                <1>     test    al, 0x02            ; check input buffer status
+   113                              <1>                                 ; must be clear before attempting to write data to IO port 0x60 or IO port 0x64
+   114 00000787 E0FA                <1>     loopnz  .10L            ; } while (--CX && !ZF);
+   115                              <1> 
+   116 00000789 83F900              <1>     cmp     cx, 0           ; if cnt == 0 again, it means time-out
+   117 0000078C 7405                <1>     jz      .20E            ; if (CX) {
+   118 0000078E 8A4604              <1>     mov     al, [bp + 4]        ; AL = input_data;
+   119 00000791 E664                <1>     out     0x64, al            ; outp(0x60, AL);
+   120                              <1>                             ; }
+   121                              <1> 
+   122                              <1> .20E:
+   123 00000793 89C8                <1>     mov     ax, cx          ; return CX;
+   124                              <1> 
+   125                              <1>     ; return registers
+   126 00000795 59                  <1>     pop     cx
+   127                              <1> 
+   128                              <1>     ; destroy stack frame
+   129 00000796 89EC                <1>     mov     sp, bp
+   130 00000798 5D                  <1>     pop     bp
+   131                              <1> 
+   132 00000799 C3                  <1>     ret
+   184                                  
+   185                                  stage_4:
+   186 0000079A 68[EB07]E820F983C4-         cdecl   puts, .s0               ; display a message
+   186 000007A2 02                 
+   187                                  
+   188                                      ; enabling the A20 line
+   189 000007A3 FA                          cli
+   190 000007A4 68AD00E8D2FF83C402          cdecl   KBC_Cmd_Write, 0xAD     ; Disable first PS/2 port(keyboard)
+   191                                  
+   192 000007AD 68D000E8C9FF83C402          cdecl   KBC_Cmd_Write, 0xD0     ; Read Controller Output Port
+   193 000007B6 68[0F08]E89CFF83C4-         cdecl   KBC_Data_Read, .key
+   193 000007BE 02                 
+   194 000007BF 8A1E[0F08]                  mov     bl, [.key]
+   195 000007C3 80CB02                      or      bl, 0x02                ; enable A20 line
+   196                                  
+   197 000007C6 68D100E8B0FF83C402          cdecl   KBC_Cmd_Write, 0xD1     ; Write next byte to Controller Output Port
+   198 000007CF 53E867FF83C402              cdecl   KBC_Data_Write, bx
+   199                                  
+   200 000007D6 68AE00E8A0FF83C402          cdecl   KBC_Cmd_Write, 0xAE     ; Enable first PS/2 port(keyboard)
+   201 000007DF FB                          sti
+   202                                  
+   203                                      ; print("A20 Gate Enabled.\n");
+   204 000007E0 68[FA07]E8DAF883C4-         cdecl   puts, .s1
+   204 000007E8 02                 
+   205                                  
+   206                                      ; while(1);
+   207 000007E9 EBFE                        jmp     $
+   208                                  
+   209 000007EB 347468207374616765-     .s0:    db  "4th stage...", 0x0A, 0x0D, 0
+   209 000007F4 2E2E2E0A0D00       
+   210 000007FA 204132302047617465-     .s1:    db  " A20 Gate Enabled.", 0x0A, 0x0D, 0
+   210 00000803 20456E61626C65642E-
+   210 0000080C 0A0D00             
+   211                                  
+   212 0000080F 0000                    .key:   dw  0
+   213                                  
+   214                                  ; --- padding ---
+   215 00000811 00<rept>                times BOOT_SIZE - ($- $$)  db  0   ; up to 8K
