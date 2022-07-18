@@ -171,6 +171,6 @@ stage_3rd:
 
 .s2:    db  " ACPI data="
 .p3:    db  "ZZZZ"
-.p4:    db  "ZZZZ", 0x0A, 0x0D
+.p4:    db  "ZZZZ", 0x0A, 0x0D, 0
     ; --- padding ---
     times BOOT_SIZE - ($- $$)  db  0   ; up to 8K
