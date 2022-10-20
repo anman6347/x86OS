@@ -18,6 +18,7 @@ read_lba:
     push    si
 
     ; get drive params
+    mov     si, [bp + 4]
 
     ; convert to CHS from LBA
     mov     ax, [bp + 6]

@@ -1,0 +1,55 @@
+     1                                      ; --- macro ---
+     2                                      %include    "../include/define.s"
+     1                              <1> ; defines of important constants
+     2                              <1> 
+     3                              <1> SECT_SIZE   equ     (512)                       ; size of a sector
+     4                              <1> 
+     5                              <1> 
+     6                              <1> BOOT_LOAD   equ     0x7c00                      ; addr where boot program loaded
+     7                              <1> BOOT_SIZE   equ     (1024 * 8)                  ; size of boot code
+     8                              <1> BOOT_SECT   equ     (BOOT_SIZE / SECT_SIZE)     ; number of sectors used in boot program
+     9                              <1> BOOT_END    equ     (BOOT_LOAD + BOOT_SIZE)     ; the end of boot code
+    10                              <1> 
+    11                              <1> E820_RECORD_SIZE    equ     20                  ; the record size (size of buffer for result) used in INT 0x15, EAX = 0xE820
+    12                              <1> 
+    13                              <1> 
+    14                              <1> KERNEL_LOAD equ     0x0010_1000                 ; addr where the kernel loaded
+    15                              <1> KERNEL_SIZE equ     (1024 * 8)                  ; size of the kernel
+    16                              <1> KERNEL_SECT equ     (KERNEL_SIZE / SECT_SIZE)   ; number of sectors used in kernel
+     3                                      %include    "../include/macro.s"
+     1                              <1> ; --- cdecl ---
+     2                              <1> 
+     3                              <1> %macro cdecl 1-*.nolist
+     4                              <1>     %rep    %0 - 1
+     5                              <1>         push    %{-1:-1}
+     6                              <1>         %rotate -1
+     7                              <1>     %endrep
+     8                              <1>     %rotate -1
+     9                              <1> 
+    10                              <1>     call    %1
+    11                              <1> 
+    12                              <1>     %if 1 < %0          ; delete args
+    13                              <1>         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
+    14                              <1>     %endif
+    15                              <1> %endmacro
+    16                              <1> 
+    17                              <1> 
+    18                              <1> ; --- drive struct ---
+    19                              <1> struc drive
+    20 00000000 <res 00000002>      <1>     .no     resw    1       ; drive number
+    21 00000002 <res 00000002>      <1>     .cyln   resw    1       ; cylinder
+    22 00000004 <res 00000002>      <1>     .head   resw    1       ; head
+    23 00000006 <res 00000002>      <1>     .sect   resw    1       ; sector
+    24                              <1> endstruc
+     4                                  
+     5                                      ORG     KERNEL_LOAD
+     6                                  
+     7                                  [BITS 32]
+     8                                  
+     9                                      ; --- entry point ---
+    10                                  kernel:
+    11 00000000 EBFE                        jmp     $                       ; while(1);
+    12                                  
+    13                                  
+    14                                  ; --- padding ---
+    15 00000002 00<rept>                    times KERNEL_SIZE - ($ - $$) db 0x00
