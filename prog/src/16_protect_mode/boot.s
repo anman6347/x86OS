@@ -371,7 +371,7 @@ CODE32:
     mov     es, ax
     mov     fs, ax
     mov     gs, ax
-    mov     ds, ax
+    mov     ss, ax
 
     ; copy kernel to 0x0010_1000 4bytes at a time
     mov     ecx, (KERNEL_SIZE) / 4

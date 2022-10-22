@@ -1299,7 +1299,7 @@
    371 00000A18 8EC0                        mov     es, ax
    372 00000A1A 8EE0                        mov     fs, ax
    373 00000A1C 8EE8                        mov     gs, ax
-   374 00000A1E 8ED8                        mov     ds, ax
+   374 00000A1E 8ED0                        mov     ss, ax
    375                                  
    376                                      ; copy kernel to 0x0010_1000 4bytes at a time
    377 00000A20 B900080000                  mov     ecx, (KERNEL_SIZE) / 4
