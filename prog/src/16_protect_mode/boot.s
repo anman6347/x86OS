@@ -302,11 +302,87 @@ stage_6:
     mov     ax, 0x12                ; VGA 640x480 16 color graphics 
     int     0x10
 
-    ; while(1)
-    jmp     $
+    ; transition to the 7th stage
+    jmp     stage_7
 
 .s0:    db  "6th stage...", 0x0A, 0x0D, 0x0A, 0x0D
         db  " [Push SPACE key to protect mode...]", 0x0A, 0x0D, 0
+
+
+
+
+
+
+    ; ----------------------------
+    ; Global segment Descriptor Table
+    ; ----------------------------
+ALIGN 4, db 0
+;          Base31:24_G_D_0_AVL_Limit19:16_P_DPL_DT_Type_base23:0_limit15:0
+GDT:    dq 0b00000000_0_0_0_0_0000_0_00_0_0000_000000000000000000000000_0000000000000000    ; NULL
+.cosg:  dq 0b00000000_1_1_0_0_1111_1_00_1_1010_000000000000000000000000_1111111111111111    ; CODE 4G r/x
+.dasg:  dq 0b00000000_1_1_0_0_1111_1_00_1_0010_000000000000000000000000_1111111111111111    ; DATA 4G r/w
+.gdt_end:
+
+    ; segment selectors (GDT)
+SEL_CODE    equ .cosg - GDT
+SEL_DATA    equ .dasg - GDT
+
+
+    ; GDT base address and limit from memory into the GDTR register
+GDTR:
+    dw  GDT.gdt_end - GDT - 1   ; 16-Bit Table Limit
+    dd  GDT                     ; 32-bit Linear Base Address
+
+    ; IDT base address and limit from memory into the IDTR register
+    ; Set empty IDT in order for the processor to ignore external interrupts 
+IDTR:
+    dw  0x00                    ; 16-Bit Table Limit
+    dd  0x00                    ; 32-bit Linear Base Address
+
+
+    ; ----------------------------
+    ; --- 7th stage of booting ---
+    ; ----------------------------
+
+stage_7:
+    cli
+    ;  load and store the GDTR, IDTR
+    lgdt    [GDTR]
+    lidt    [IDTR]
+
+    ; Enable protected mode
+    mov     eax, cr0
+    or      ax, 1               ; CR0.PE |= 1
+    mov     cr0, eax
+
+    ; The JMP or CALL instruction immediately after the MOV CR0 instruction changes the flow of execution and serializes the processor
+    jmp     $ + 2
+
+[BITS 32]
+    db  0x66    ; The instruction prefix 66H can be used to select an operand size other than the default
+    jmp     SEL_CODE:CODE32
+
+
+    ; --- 32bit code segment ---
+CODE32:
+    ; Initialize selectors (cs has already been Initialized)
+    mov     ax, SEL_DATA
+    mov     ds, ax
+    mov     es, ax
+    mov     fs, ax
+    mov     gs, ax
+    mov     ds, ax
+
+    ; copy kernel to 0x0010_1000 4bytes at a time
+    mov     ecx, (KERNEL_SIZE) / 4
+    mov     esi, BOOT_END           ; kernel is set at BOOT_END (= 0x9c00) in the process of 6th stage
+    mov     edi, KERNEL_LOAD        ; EDI = 0x0010_1000
+    cld
+    rep     movsd
+
+
+    ; --- jump into the kernel ---
+    jmp     KERNEL_LOAD
 
 
 ; --- padding ---

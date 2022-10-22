@@ -1225,8 +1225,8 @@
    302 00000992 B81200                      mov     ax, 0x12                ; VGA 640x480 16 color graphics 
    303 00000995 CD10                        int     0x10
    304                                  
-   305                                      ; while(1)
-   306 00000997 EBFE                        jmp     $
+   305                                      ; transition to the 7th stage
+   306 00000997 EB5B                        jmp     stage_7
    307                                  
    308 00000999 367468207374616765-     .s0:    db  "6th stage...", 0x0A, 0x0D, 0x0A, 0x0D
    308 000009A2 2E2E2E0A0D0A0D     
@@ -1237,5 +1237,81 @@
    309 000009CD 0A0D00             
    310                                  
    311                                  
-   312                                  ; --- padding ---
-   313 000009D0 00<rept>                times BOOT_SIZE - ($- $$)  db  0   ; up to 8K
+   312                                  
+   313                                  
+   314                                  
+   315                                  
+   316                                      ; ----------------------------
+   317                                      ; Global segment Descriptor Table
+   318                                      ; ----------------------------
+   319                                  ALIGN 4, db 0
+   320                                  ;          Base31:24_G_D_0_AVL_Limit19:16_P_DPL_DT_Type_base23:0_limit15:0
+   321 000009D0 0000000000000000        GDT:    dq 0b00000000_0_0_0_0_0000_0_00_0_0000_000000000000000000000000_0000000000000000    ; NULL
+   322 000009D8 FFFF0000009ACF00        .cosg:  dq 0b00000000_1_1_0_0_1111_1_00_1_1010_000000000000000000000000_1111111111111111    ; CODE 4G r/x
+   323 000009E0 FFFF00000092CF00        .dasg:  dq 0b00000000_1_1_0_0_1111_1_00_1_0010_000000000000000000000000_1111111111111111    ; DATA 4G r/w
+   324                                  .gdt_end:
+   325                                  
+   326                                      ; segment selectors (GDT)
+   327                                  SEL_CODE    equ .cosg - GDT
+   328                                  SEL_DATA    equ .dasg - GDT
+   329                                  
+   330                                  
+   331                                      ; GDT base address and limit from memory into the GDTR register
+   332                                  GDTR:
+   333 000009E8 1700                        dw  GDT.gdt_end - GDT - 1   ; 16-Bit Table Limit
+   334 000009EA [D0090000]                  dd  GDT                     ; 32-bit Linear Base Address
+   335                                  
+   336                                      ; IDT base address and limit from memory into the IDTR register
+   337                                      ; Set empty IDT in order for the processor to ignore external interrupts 
+   338                                  IDTR:
+   339 000009EE 0000                        dw  0x00                    ; 16-Bit Table Limit
+   340 000009F0 00000000                    dd  0x00                    ; 32-bit Linear Base Address
+   341                                  
+   342                                  
+   343                                      ; ----------------------------
+   344                                      ; --- 7th stage of booting ---
+   345                                      ; ----------------------------
+   346                                  
+   347                                  stage_7:
+   348 000009F4 FA                          cli
+   349                                      ;  load and store the GDTR, IDTR
+   350 000009F5 0F0116[E809]                lgdt    [GDTR]
+   351 000009FA 0F011E[EE09]                lidt    [IDTR]
+   352                                  
+   353                                      ; Enable protected mode
+   354 000009FF 0F20C0                      mov     eax, cr0
+   355 00000A02 83C801                      or      ax, 1               ; CR0.PE |= 1
+   356 00000A05 0F22C0                      mov     cr0, eax
+   357                                  
+   358                                      ; The JMP or CALL instruction immediately after the MOV CR0 instruction changes the flow of execution and serializes the processor
+   359 00000A08 EB00                        jmp     $ + 2
+   360                                  
+   361                                  [BITS 32]
+   362 00000A0A 66                          db  0x66    ; The instruction prefix 66H can be used to select an operand size other than the default
+   363 00000A0B EA[120A0000]0800            jmp     SEL_CODE:CODE32
+   364                                  
+   365                                  
+   366                                      ; --- 32bit code segment ---
+   367                                  CODE32:
+   368                                      ; Initialize selectors (cs has already been Initialized)
+   369 00000A12 66B81000                    mov     ax, SEL_DATA
+   370 00000A16 8ED8                        mov     ds, ax
+   371 00000A18 8EC0                        mov     es, ax
+   372 00000A1A 8EE0                        mov     fs, ax
+   373 00000A1C 8EE8                        mov     gs, ax
+   374 00000A1E 8ED8                        mov     ds, ax
+   375                                  
+   376                                      ; copy kernel to 0x0010_1000 4bytes at a time
+   377 00000A20 B900080000                  mov     ecx, (KERNEL_SIZE) / 4
+   378 00000A25 BE009C0000                  mov     esi, BOOT_END           ; kernel is set at BOOT_END (= 0x9c00) in the process of 6th stage
+   379 00000A2A BF00101000                  mov     edi, KERNEL_LOAD        ; EDI = 0x0010_1000
+   380 00000A2F FC                          cld
+   381 00000A30 F3A5                        rep     movsd
+   382                                  
+   383                                  
+   384                                      ; --- jump into the kernel ---
+   385 00000A32 E9(00101000)                jmp     KERNEL_LOAD
+   386                                  
+   387                                  
+   388                                  ; --- padding ---
+   389 00000A37 00<rept>                times BOOT_SIZE - ($- $$)  db  0   ; up to 8K
