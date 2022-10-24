@@ -1,0 +1,127 @@
+     1                                      ; --- macro ---
+     2                                      %include    "../include/define.s"
+     1                              <1> ; defines of important constants
+     2                              <1> 
+     3                              <1> SECT_SIZE   equ     (512)                       ; size of a sector
+     4                              <1> 
+     5                              <1> 
+     6                              <1> BOOT_LOAD   equ     0x7c00                      ; addr where boot program loaded
+     7                              <1> BOOT_SIZE   equ     (1024 * 8)                  ; size of boot code
+     8                              <1> BOOT_SECT   equ     (BOOT_SIZE / SECT_SIZE)     ; number of sectors used in boot program
+     9                              <1> BOOT_END    equ     (BOOT_LOAD + BOOT_SIZE)     ; the end of boot code
+    10                              <1> 
+    11                              <1> E820_RECORD_SIZE    equ     20                  ; the record size (size of buffer for result) used in INT 0x15, EAX = 0xE820
+    12                              <1> 
+    13                              <1> 
+    14                              <1> KERNEL_LOAD equ     0x0010_1000                 ; addr where the kernel loaded
+    15                              <1> KERNEL_SIZE equ     (1024 * 8)                  ; size of the kernel
+    16                              <1> KERNEL_SECT equ     (KERNEL_SIZE / SECT_SIZE)   ; number of sectors used in kernel
+     3                                      %include    "../include/macro.s"
+     1                              <1> ; --- cdecl ---
+     2                              <1> 
+     3                              <1> %macro cdecl 1-*.nolist
+     4                              <1>     %rep    %0 - 1
+     5                              <1>         push    %{-1:-1}
+     6                              <1>         %rotate -1
+     7                              <1>     %endrep
+     8                              <1>     %rotate -1
+     9                              <1> 
+    10                              <1>     call    %1
+    11                              <1> 
+    12                              <1>     %if 1 < %0          ; delete args
+    13                              <1>         add     sp, (__BITS__ >> 3) * (%0 - 1)      ; if realmode then __BITS__ = 16
+    14                              <1>     %endif
+    15                              <1> %endmacro
+    16                              <1> 
+    17                              <1> 
+    18                              <1> ; --- drive struct ---
+    19                              <1> struc drive
+    20 00000000 <res 00000002>      <1>     .no     resw    1       ; drive number
+    21 00000002 <res 00000002>      <1>     .cyln   resw    1       ; cylinder
+    22 00000004 <res 00000002>      <1>     .head   resw    1       ; head
+    23 00000006 <res 00000002>      <1>     .sect   resw    1       ; sector
+    24                              <1> endstruc
+     4                                  
+     5                                      ORG     KERNEL_LOAD
+     6                                  
+     7                                  [BITS 32]
+     8                                  
+     9                                      ; --- entry point ---
+    10                                  kernel:
+    11                                      ; get 8 * 16 BIOS font address (exsisted at the end of MBR)
+    12 00000000 BE007E0000                  mov     esi, BOOT_LOAD + SECT_SIZE      ; ESI = 0x7c00 + 512
+    13 00000005 0FB706                      movzx   eax, word [esi + 0]             ; segment for font addr (ESI + 0 not equals DS:ESI)
+    14 00000008 0FB75E02                    movzx   ebx, word [esi + 2]             ; offset for font addr
+    15 0000000C C1E004                      shl     eax , 4
+    16 0000000F 01D8                        add     eax, ebx                        ; seg:off in real mode
+    17 00000011 A3[D8000000]                mov     [FONT_ADR], eax
+    18                                  
+    19                                      ; display 8dot hlines
+    20 00000016 B407                        mov     ah, 0x07                        ; i = 0, r = 1, g = 1, b = 1
+    21 00000018 B002                        mov     al, 0x02                        ; index
+    22 0000001A 66BAC403                    mov     dx, 0x03C4
+    23 0000001E 66EF                        out     dx, ax
+    24 00000020 C60500000A00FF              mov     [0x000A_0000 + 0], byte 0xFF    ; 8dot hline
+    25                                  
+    26 00000027 B404                        mov     ah, 0x04                        ; i = 0, r = 1, g = 0, b = 0
+    27 00000029 66EF                        out     dx, ax
+    28 0000002B C60501000A00FF              mov     [0x000A_0000 + 1], byte 0xFF    ; 8dot hline
+    29                                  
+    30 00000032 B402                        mov     ah, 0x02                        ; i = 0, r = 0, g = 1, b = 0
+    31 00000034 66EF                        out     dx, ax
+    32 00000036 C60502000A00FF              mov     [0x000A_0000 + 2], byte 0xFF    ; 8dot hline
+    33                                  
+    34 0000003D B401                        mov     ah, 0x01                        ; i = 0, r = 0, g = 0, b = 1
+    35 0000003F 66EF                        out     dx, ax
+    36 00000041 C60503000A00FF              mov     [0x000A_0000 + 3], byte 0xFF    ; 8dot hline
+    37                                  
+    38                                      ; display 640dot(= screen width) hline
+    39 00000048 B40B                        mov     ah, 0x0B                        ; i = 1, r = 0, g = 1, b = 1
+    40 0000004A 66EF                        out     dx, ax
+    41                                  
+    42 0000004C 8D3D50000A00                lea     edi, [0x000A_0000 + 80]         ; EDI = 0xA0000 + 80
+    43 00000052 B950000000                  mov     ecx, 80                         ; counter
+    44 00000057 B0FF                        mov     al, 0xFF
+    45 00000059 FC                          cld                                     ; positive direction
+    46 0000005A F3AA                        rep     stosb                           ; *EDI++ = AL
+    47                                  
+    48                                      ; display 8dot square on the 2nd line
+    49 0000005C BF01000000                  mov     edi, 1
+    50                                      ; 80 * 16 = 1280 = 256 * 5 (to accelerate calculation)
+    51 00000061 C1E708                      shl     edi, 8
+    52 00000064 8DBCBF00000A00              lea     edi, [0xA_0000 + edi * 5]
+    53                                  
+    54 0000006B 66C707FF00                  mov     [edi + (80 * 0)], word  0xFF    
+    55 00000070 66C74750FF00                mov     [edi + (80 * 1)], word  0xFF
+    56 00000076 66C787A0000000FF00          mov     [edi + (80 * 2)], word  0xFF
+    57 0000007F 66C787F0000000FF00          mov     [edi + (80 * 3)], word  0xFF
+    58 00000088 66C78740010000FF00          mov     [edi + (80 * 4)], word  0xFF
+    59 00000091 66C78790010000FF00          mov     [edi + (80 * 5)], word  0xFF
+    60 0000009A 66C787E0010000FF00          mov     [edi + (80 * 6)], word  0xFF
+    61 000000A3 66C78730020000FF00          mov     [edi + (80 * 7)], word  0xFF
+    62                                  
+    63                                      ; display character 'A'
+    64 000000AC BE41000000                  mov     esi, 'A'
+    65 000000B1 C1E604                      shl     esi, 4                          ; the size of a character is 16byte
+    66 000000B4 0335[D8000000]              add     esi, [FONT_ADR]                 ; *ESI = the font of 'A'
+    67                                      ; 80 * 2 * 16 = 512 * 5
+    68 000000BA BF02000000                  mov     edi, 2
+    69 000000BF C1E708                      shl     edi, 8
+    70 000000C2 8DBCBF00000A00              lea     edi, [0xA_0000 + edi * 5]
+    71                                      ; draw 'A'
+    72 000000C9 B910000000                  mov     ecx, 16                         ; height of 'A'
+    73                                  .10L:
+    74 000000CE A4                          movsb                                   ; *EDI++ = *ESI++
+    75 000000CF 83C74F                      add     edi, 80 - 1                     ; to the next line of 'A'
+    76 000000D2 E2FA                        loop    .10L
+    77                                  
+    78                                  
+    79                                      ; while(1)
+    80 000000D4 EBFE                        jmp     $
+    81                                  
+    82                                  
+    83 000000D6 00<rept>                ALIGN 4, db 0
+    84 000000D8 00000000                FONT_ADR:   dd  0
+    85                                  
+    86                                  ; --- padding ---
+    87 000000DC 00<rept>                    times KERNEL_SIZE - ($ - $$) db 0x00
