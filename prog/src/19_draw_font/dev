@@ -1,0 +1,15 @@
+#!/bin/sh
+
+if [ -e boot.img ]; then
+    rm boot.img
+fi
+
+nasm boot.s -o boot.img -l boot.lst
+nasm kernel.s -o kernel.img -l kernel.lst
+
+if [ -e boot.img ] && [ -e kernel.img ]; then
+    cat boot.img kernel.img > os.img
+    qemu-system-i386 -drive file=os.img,format=raw -boot order=c
+else
+    echo "error!"
+fi
