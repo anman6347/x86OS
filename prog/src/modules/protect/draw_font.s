@@ -33,7 +33,7 @@ draw_font:
     mov     eax, ecx                            ;   EAX = ECX;
     and     eax, 0x0F                           ;   EAX &= 0x0F;
     add     eax, esi                            ;   EAX += x;
-
+    ; calc y(row)
     mov     ebx, ecx                            ;   EBX = ECX;
     shr     ebx, 4                              ;   EBX /= 16;
     add     ebx, edi                            ;   EBX += y;
