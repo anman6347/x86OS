@@ -41,6 +41,8 @@ lba_chs:
                                     ; AL = AX / num of sects per track;
     movzx   dx, ah                  ; DX = S
     mov     ah, 0x00                ; AX = C
+    inc     dx
+
     mov     [di + drive.head], ax
     mov     [di + drive.sect], dx
 
